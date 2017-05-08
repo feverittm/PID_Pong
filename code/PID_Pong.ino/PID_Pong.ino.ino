@@ -23,17 +23,15 @@ const int OptionButton1 = 0;  //
 const int OptionButton2 = 1;  // 
 const int PWMOut1 = 3;        // 
 const int Debounce = 500;     // The number of miliseconds to wait to prevent skipping multiple menus
+const int LoopDelay = 50;
+const int servoMin = 100;     // Fast enough so the ball floats down (not too fast)
+const int servoMax = 120;     // jast fast enough to have the ball float up
+const int servoStop = 90;     // Servo neutral (stop) position.
 
-// Set up some variables to use for passing information to and from interrupt service routines
-// These need to be of type volatile to insure they can pass data in and out of the service routine.
-volatile int pulsewidth = 0;
-volatile int time_between_pulses = 0;
-volatile boolean rotationforward = false;
-volatile boolean rotationlast = true;
-
-
-// initialize the LCD library with the numbers of the interface pins
+// initialize the LCD library with the numbers of the interface pins. Don't change these pin numbers
+// they are set up for the connections on the SuperTester board as it maps to a standard arduino uno.
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+
 // And define some variables needed for this particular LCD shield
 int ButtonVoltage = 0;
 int ButtonPressed = 0;
@@ -41,111 +39,107 @@ int Backlight = 5;
 int fadeValue = 255;
 int setpoint  = 0;
 
-int first_pass = 1;
+// Control variables for this program
 int mode = 0; // Mode 0 = Manual, 1 = Autonomous
+int state = 0;  // convert operations to a state machine.
+
 
 // This is the tester setup function that runs at powerup.
 // Any setup code that only needs to run once goes here.  This includes the splash screen which can be customized
 // to show other team names or numbers.
 void setup() {
+
+  // Set up the LCD and push on the splash screen...
   lcd.begin(16, 2);              // set LCD library for the number of cols and rows on display. 
   lcd.setCursor (0,0);           // set the cursor to column 0, line 0
   lcd.print("PID Pong");         // Print a Flash Screen message to the LCD.  (May be customized as desired)
   lcd.setCursor (0,1);           // Position for the second line of text
   lcd.print("v0.0");             // Print line 2 of the flash screen  (May be customized as desired)
-  delay(1500);                   // Wait a short time to allow the Flash Screen to be read before running the main prog.
 
   // Initalize some inputs and outputs
-  pinMode(0, INPUT);
-  pinMode(1, INPUT);             // These will be used to read PWM and encoder inputs
-  pinMode(2, INPUT);
+  pinMode(0, INPUT);             // spare...
+  pinMode(1, INPUT);             // 
+  pinMode(2, INPUT);             // spare...
 
   digitalWrite(OptionButton1, HIGH);      // set pullup on pin for front panel option button 1  
-  digitalWrite(OptionButton2, HIGH);      // set pullup on pin for button 2 
-  // digitalWrite(DigitalIO2, HIGH);        // set pullup on pin 12 
+  digitalWrite(OptionButton2, HIGH);      // set pullup on pin for button 2  
   digitalWrite(SelectButton, HIGH);       // set pullup on pin for the select button 
- 
-  pinMode(A0, INPUT);                     // Initalize the analog inputs
-  pinMode(A1, INPUT);      
-  pinMode(A2, INPUT);
-  pinMode(A3, INPUT);
-  
   digitalWrite(NextButton, HIGH);         // set pullup for the NEXT button
 
+  pinMode(A0, INPUT);                     // Poteniometer Knob input
+  pinMode(A1, INPUT);                     // Ultrasonic (Maxbotics MAX1033) input
+  pinMode(A2, INPUT);                     // spare...
+  pinMode(A3, INPUT);                     // spare...
+
+  // Wait a short time to allow the Flash Screen to be read before running the main prog. 
+  delay(1500);                   
   Clearscreen();
 
-  mode = 0;
+  // Initialize Fan Motor to off.
+  pinMode(PWMOut1, OUTPUT);  
+  myservo1.attach(PWMOut1);        // attaches pin identified as PWMOut1 to the first servo object 
+  
+  // state variables
+  mode = 0;  // default is manual mode
+  state = 0; // startup state
+
+  // for debugging.  Maybe later PC control.
   Serial.begin(9600);
 }
 
-// This is the main program loop which just cycles through each test then starts over.  It creates the tester
-// menus and allows the user to either skip a function or to run it depending on what buttom they press.
-// To make this method of selecting and running individual tests complete, each individual test function should 
-// be set up to run continuously until the "NEXT" key is hit.    
-void loop() {                              // This loop creats all of the top level menus
-  if (first_pass == 1) {
-    ZeroKnob(PanelKnob);                     // make sure that the control knob is centered before starting output
-    SetupServos();                               // Setup two I/Os for use as servo outputs 
+// This is the main program loop which just cycles through each state then starts over.  
+void loop() {
+  // initialize and startup in loop... these things can't be in the startup() code???
+  if (state == 0) {
+    myservo1.write(90);              // Make sure that PWM outputs start with motors turned off 
+    ZeroKnob(PanelKnob);             // make sure that the control knob is centered before starting output
+    state = 1;
   }
 
-  if (mode == 0) {
-    MyPWMOUT();
-    Myanalog();
-  }
-
-  if (mode == 1) {
-    setpoint = SetSetpoint();
-    PositionControl(setpoint);
-  }
-
-  if (digitalRead(NextButton) == LOW) {
-    delay(Debounce);
-    Clearscreen();
-    if (mode == 0) { 
-      mode = 1; 
-      Waitforinput("Select Auto Mode");
-      }
-    else { 
-      mode = 0; 
-      Waitforinput("Manual Mode");
-      }
-
-      delay(Debounce);
+  // main running state...
+  if (state == 1) {
+    if (mode == 0) {
+      MyPWMOUT();
+      Myanalog();
     }
 
-  if (digitalRead(OptionButton1) == LOW) {
-    while (digitalRead(OptionButton1) == LOW) {
-      delay(Debounce);
+    if (mode == 1) {
+      setpoint = SetSetpoint();
+      PositionControl(setpoint);
     }
-    mode = 0;
-    myservo1.write(90);
+
+    state = 2;
   }
-   
-  first_pass = 0;
+
+  // Switch modes...
+  if (state == 2){
+    // mode switcher...
+    if (digitalRead(NextButton) == LOW) {
+      Clearscreen();
+      delay(Debounce);
+      while (digitalRead(NextButton) == LOW) {
+        delay(Debounce);
+      }
+
+      if (mode == 0) { 
+        mode = 1; 
+        Waitforinput("Select Auto Mode");
+        }
+      else { 
+        mode = 0; 
+        Waitforinput("Sel. Manual Mode");
+        }
+
+        delay(Debounce);
+      }
+  }
+  state=1;
+  delay(LoopDelay);
 }
 
 // Any more sub menues should go here.
 
-void PositionControl(int setpoint) {
-  Clearscreen();
-  while (true){
-    int position = analogRead(A1);
-    int error = position - setpoint;
-    lcd.setCursor(0,0);
-    lcd.print("Position: ");
-    lcd.print(position);
-    lcd.setCursor(0,1);
-    lcd.print("Error : ");
-    lcd.print(error);
 
-    if (error > 0) {
-      myservo1.write(150);
-    } else {
-      myservo1.write(90);
-    }
-    delay(Debounce);
-  }
-}
 
 // Warning.  Be careful with strings.  there is only 2K of RAM and strings are stored in RAM.  If it is used up,
 // the tester can act erraticlly.  These following functions help reduce the need for storing lots of blanks
@@ -333,6 +327,41 @@ int SetSetpoint()
   Clearscreen();
   return setpoint;
 }
+
+int LimitServo() 
+{ 
+    int pwmout;                                    // a variable to store the planned output PWM value 
+    pinMode(PWMOut1, OUTPUT);                      // Initalize the servo outputs
+    pwmout = Servoscale(PanelKnob);                // Read analog input to a value 
+    pwmout = map(pwmout, 179, 0, 0, 185);          // Reverse the direction of pwmout    
+    myservo1.write(pwmout);                        // Outputs the servo control according to the scaled value 
+    return pwmout;                                 // Return the current output valued for displaying on the screen
+}
+
+// learning:  Ultrasonic response is too slow to react to the the ball moving
+// at even a moderate speed.  Need to set a max speed by setting max and min fan speed.
+//
+void PositionControl(int setpoint) {
+  Clearscreen();
+  while (true){
+    int position = analogRead(A1);
+    int error = position - setpoint;
+    lcd.setCursor(0,0);
+    lcd.print("Position: ");
+    lcd.print(position);
+    lcd.setCursor(0,1);
+    lcd.print("Error : ");
+    lcd.print(error);
+
+    if (error > 0) {
+      myservo1.write(servoMax);
+    } else {
+      myservo1.write(servoMin);
+    }
+    delay(LoopDelay);
+  }
+}
+
 // A routine to right justify numbers when they are displayed
 // This feature is not yet used universally by all functions
 void printjustify(int n) 
