@@ -24,8 +24,8 @@ const int OptionButton2 = 1;  //
 const int PWMOut1 = 3;        // 
 const int Debounce = 500;     // The number of miliseconds to wait to prevent skipping multiple menus
 const int LoopDelay = 50;
-const int servoMin = 100;     // Fast enough so the ball floats down (not too fast)
-const int servoMax = 120;     // jast fast enough to have the ball float up
+const int servoMin = 130;     // Fast enough so the ball floats down (not too fast)
+const int servoMax = 135;     // jast fast enough to have the ball float up
 const int servoStop = 90;     // Servo neutral (stop) position.
 
 // initialize the LCD library with the numbers of the interface pins. Don't change these pin numbers
@@ -93,6 +93,7 @@ void loop() {
   if (state == 0) {
     myservo1.write(90);              // Make sure that PWM outputs start with motors turned off 
     ZeroKnob(PanelKnob);             // make sure that the control knob is centered before starting output
+    setpoint = SetSetpoint();
     state = 1;
   }
 
@@ -104,11 +105,9 @@ void loop() {
     }
 
     if (mode == 1) {
-      setpoint = SetSetpoint();
       PositionControl(setpoint);
     }
-
-    state = 2;
+    state=2;
   }
 
   // Switch modes...
@@ -343,7 +342,7 @@ int LimitServo()
 //
 void PositionControl(int setpoint) {
   Clearscreen();
-  while (true){
+    setpoint = analogRead(A0); 
     int position = analogRead(A1);
     int error = position - setpoint;
     lcd.setCursor(0,0);
@@ -359,7 +358,6 @@ void PositionControl(int setpoint) {
       myservo1.write(servoMin);
     }
     delay(LoopDelay);
-  }
 }
 
 // A routine to right justify numbers when they are displayed
